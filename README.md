@@ -13,7 +13,6 @@
 - $L$: Scalar loss
 - $dO = \frac{\partial L}{\partial O}$: Gradient of the loss with respect to the output
 
-
 ## Online Softmax
 
 Given an input vector $`x = \{x_i\}_{i = 1}^N`$, the softmax operation generates a new vector
@@ -37,6 +36,7 @@ $$
 It's very clear that in its current form, a naive way to compute $y$ is:
 
 ---
+
 1. Initialization
 
 $$
@@ -47,41 +47,53 @@ l_0 &= 0
 $$
 
 ---
-2. Geting maximum
+
+2. Getting maximum
 
 ```
 for i = 1 to N
 ```
+
 $$
 m_i = \max(m_{i - 1}, x_i)
 $$
+
 ```
 end
 ```
+
 ---
+
 3. Computing softmax denominator
 
 ```
 for i = 1 to N
 ```
+
 $$
 l_i = l_{i - 1} + e^{x_i - m_N}
 $$
+
 ```
 end
 ```
+
 ---
+
 4. Computing softmax results
 
 ```
 for i = 1 to N
 ```
+
 $$
 y_i = \frac{e^{x_i - m_N}}{l_N}
 $$
+
 ```
 end
 ```
+
 ---
 
 This algorithm generates two intermediate sequences, one for the running maximum of the input vector
@@ -118,13 +130,16 @@ Notice that $l_N' = l_N$, which is exactly the softmax denominator. Therefore, w
 $$
 \begin{aligned}
 m_i &= \max({m_{i - 1}, x_i}) \\
-l_i' &= \sum_{j = 1}^i e^{x_j - m_j} = \sum_{j = 1}^{i - 1} e^{x_j - m_j} + e^{x_i - m_i} = l_{i - 1}' e^{m_{i - 1} - m_i} + e^{x_i - m_i}
+l_i' &= \sum_{j = 1}^i e^{x_j - m_j} \\
+     &= \sum_{j = 1}^{i - 1} e^{x_j - m_j} + e^{x_i - m_i} \\
+     &= l_{i - 1}' e^{m_{i - 1} - m_i} + e^{x_i - m_i}
 \end{aligned}
 $$
 
 Based on the formula, $l_i'$ depends only on $l_{i - 1}'$, $m_{i - 1}$, $m_i$ and $x_i$, which means we can compute its value in one go.
 
 ---
+
 1. Initialization
 
 $$
@@ -135,35 +150,45 @@ l_0 &= 0
 $$
 
 ---
+
 2. Online computation
 
 ```
 for i = 1 to N
 ```
+
 $$
 \begin{aligned}
 m_i &= max(m_{i - 1}, x_i) \\
 l_i &= l_{i - 1} e^{m_{i - 1} - m_i} + e^{x_i - m_i}
 \end{aligned}
 $$
+
 ```
 end
 ```
+
 ---
+
 3. Computing softmax results
 
 ```
 for i = 1 to N
 ```
+
 $$
 y_i = \frac{e^{x_i - m_N}}{l_N}
 $$
+
 ```
 end
 ```
+
 ---
 
 ## Flash Attention
+
+### Forward
 
 Given $Q, K, V \in \mathbb{R}^{n \times d}$, where $n \in \mathbb{N^+}$ is the sequence length and $d \in \mathbb{N^+}$ is the head dimension, attention operation computes the following
 
@@ -178,9 +203,11 @@ $$
 Let's take a closer look at the attention computation over the $k$-th row of the query matrix $q = Q[k, :]$
 
 ---
+
 ```
 for i = 1 to N
 ```
+
 $$
 \begin{aligned}
 x_i &= qK[i, :]^T \\
@@ -188,31 +215,41 @@ m_i &= \max(m_{i - 1}, x_i) \\
 l_i &= l_{i - 1} e^{m_{i - 1} - m_i} + e^{x_i - m_i}
 \end{aligned}
 $$
+
 ```
 end
 ```
+
 ---
+
 ```
 for i = 1 to N
 ```
+
 $$
 \begin{aligned}
 y_i &= \frac{e^{x_i - m_N}}{l_N} \\
 o_i &= o_{i - 1} + y_i V[i, :]
 \end{aligned}
 $$
+
 ```
 end
 ```
+
 ---
+
 $$
-O[K, :] = o_N
+O[k, :] = o_N
 $$
 
 Let's take a closer look at the second loop, clearly we have
 
 $$
-o_i = \sum_{j = 1}^i y_j V[j, :] = \sum_{j = 1}^i \frac{e^{x_j - m_N}}{l_N} V[j, :]
+\begin{aligned}
+o_i &= \sum_{j = 1}^i y_j V[j, :] \\
+    &= \sum_{j = 1}^i \frac{e^{x_j - m_N}}{l_N} V[j, :]
+\end{aligned}
 $$
 
 We can use the same trick which we applied in online softmax, we define a new variable
@@ -235,6 +272,7 @@ We can see that $o_i'$ only depends on $o_{i - 1}'$, $l_{i - 1}$, $l_i$, $m_{i -
 ```
 for i = 1 to N
 ```
+
 $$
 \begin{aligned}
 x_i &= qK[i, :]^T \\
@@ -243,11 +281,12 @@ l_i &= l_{i - 1} e^{m_{i - 1} - m_i} + e^{x_i - m_i} \\
 o_i' &= o_{i - 1}' \frac{l_{i - 1} e^{m_{i - 1} - m_i}}{l_i} + \frac{e^{x_i - m_i}}{l_i} V[i, :]
 \end{aligned}
 $$
+
 ```
 end
 ```
 
-## Backward
+### Backward
 
 Recall that attention operation calculates
 
@@ -273,7 +312,7 @@ $$
 
 Before we dive into the calculation, let's first examine the derivative of Softmax operation.
 
-### Backward of Softmax
+#### Backward of Softmax
 
 Let's recall that softmax gives
 
@@ -323,6 +362,8 @@ dx &= dy \cdot J \\
 \end{aligned}
 $$
 
+#### Backward of Score Matrix
+
 Let's focus on an vector at $i$-th row in $dS$
 
 $$
@@ -356,13 +397,19 @@ $$
 Let $d = do \cdot o^T = dO[i, :] O[i, :]^T$, we have
 
 ```math
-D = \{d_i\}_{i = 1}^N = \text{rowsum}(dO \odot O)
+\begin{aligned}
+D &= \{d_i\}_{i = 1}^N \\
+  &= \text{rowsum}(dO \odot O)
+\end{aligned}
 ```
 
 Plugging in the previous formula, we have
 
 $$
-ds = dp \odot p - \text{broadcast}(d) \odot p = p \odot (dp - \text{broadcast}(d))
+\begin{aligned}
+ds &= dp \odot p - \text{broadcast}(d) \odot p \\
+   &= p \odot (dp - \text{broadcast}(d))
+\end{aligned}
 $$
 
 which gives us a single row in the final $dS$ matrix, vectorizing it yields
@@ -381,7 +428,263 @@ dK &= dS^T Q
 \end{aligned}
 $$
 
+## Flash Attention 1
+
+The primary trick is to rewrite the forward iteration process in #flash-attention in its block form.
+
+Let's first review the input of the attention operation
+
+- $Q \in \mathbb{R}^{n \times d}$: Query matrix
+- $K \in \mathbb{R}^{n \times d}$: Key matrix
+- $V \in \mathbb{R}^{n \times d}$: Value matrix
+
+For outputs, we pre-allocate some extra tensors on HBM
+
+- $O = (0)_{n \times d} \in \mathbb{R}^{n \times d}$: Output matrix
+- $m = (-\infty)_n \in \mathbb{R}^n$: Running maximum
+- $l = (0)_n \in \mathbb{R}^n$: Running softmax denominator
+
+Let's assume that $Q$ is divided into blocks of shape $\mathbb{R}^{B_r \times d}$, and $K, V$ are divided into blocks of shape $\mathbb{R}^{B_c \times d}$.
+
+There will be $T_r = \lceil \frac{n}{B_r} \rceil$ $Q$ blocks and $T_c = \lceil \frac{n}{B_c} \rceil$ $K, V$ blocks respectively.
+
+The forward computation process can be implemented as
+
+---
+
+```
+for j = 1 to T_c
+```
+
+Outer loop:
+
+Load $K_j, V_j \in \mathbb{R}^{B_c \times d}$ from HBM into SRAM
+
+```
+    for i = 1 to T_r
+```
+
+Inner loop:
+
+Load $Q_i, O_i \in \mathbb{R}^{B_r \times d}$ and $m_i, l_i \in \mathbb{R}^{B_r}$ from HBM into SRAM
+
+1. Computation
+
+$$
+\begin{aligned}
+S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+\hat{m}_{ij} &= \text{rowmax}(S_{ij}) \in \mathbb{R}^{B_r} \\
+\hat{P}_{ij} &= e^{S_{ij} - \hat{m}_{ij}} \in \mathbb{R}^{B_r \times B_c} \\
+\hat{l}_{ij} &= \text{rowsum}(\hat{P}_{ij}) \in \mathbb{R}^{B_r}
+\end{aligned}
+$$
+
+2. Online update
+
+$$
+\begin{aligned}
+m_i' &= \max(m_i, \hat{m}_{ij}) \in \mathbb{R}^{B_r} \\
+l_i' &= e^{m_i - m_i'} l_i + e^{\hat{m}_{ij} - m_i'} \hat{l}_{ij} \in \mathbb{R}^{B_r} \\
+O_i' &= \text{diag}(l_i')^{-1} (\text{diag}(l_i) e^{m_i - m_i'} O_i + e^{\hat{m}_{ij} - m_i'} \hat{P}_{ij} V_j) \in \mathbb{R}^{B_c \times d}
+\end{aligned}
+$$
+
+3. Write back HBM
+
+$$
+\begin{aligned}
+O_i &= O_i' \\
+l_i &= l_i' \\
+m_i &= m_i'
+\end{aligned}
+$$
+
+```
+    end
+```
+
+```
+end
+```
+
+---
+
+Now, let's take a look at the memory access and flops pattern assuming that we're using bfloat16.
+
+On HBM, we have $Q, K, V, O$ consumes $8nd$ bytes and $m, l$ consumes $4n$ bytes. Therefore the total HBM consumpation is $8nd + 4n$.
+
+In the outer loop, $K_j, V_j \in \mathbb{R}^{B_c \times d}$ are read into SRAM, there are $4 B_c d$ bytes HBM read. Since the outer loop repeats $T_c$ times, the total read volume is $4 B_c d T_c = 4nd$.
+
+In the inner loop, $Q_i, O_i \in \mathbb{R}^{B_r \times d}$ and $m_i, l_i \in \mathbb{R}^{B_r}$ are read from HBM, creating $4 B_r d + 4 B_r$ bytes read. Since the inner loop repeats $T_c T_r$ times, the total read volume is $(4 B_r d + 4 B_r)T_r T_c = n(4d + 4)T_c$.
+
+As for the write back, $O_i \in \mathbb{R}^{B_r \times d}$ and $m_i, l_i \in \mathbb{R}^{B_r}$ are written back to HBM, creating $2 B_r d + 4 B_r$ bytes write. Since the inner loop repeats $T_c T_r$ times, the total write volume is $(2 B_r d + 4 B_r)T_r T_c = n(2d + 4)T_c$.
+
+Therefore, the total HBM access volume is roughly $2nd (2 + 3T_c) = 2nd (2 + 3\lceil\frac{n}{B_c}\rceil)$ bytes.
+
+Apparently by having a larger $B_c$, we significantly reduce the HBM access volume. $K_j, V_j \in \mathbb{R}^{B_c \times d}$ and $Q_i, O_i \in \mathbb{R}^{B_r \times d}$ takes $4 (B_c + B_r) d$ bytes on SRAM, for a SRAM of size $M$, we have
+
+$$
+\begin{aligned}
+4 (B_c + B_r) d &\leq M \\
+B_c + B_r &\leq \frac{M}{4d}
+\end{aligned}
+$$
+
+Thus we set $B_c = \lceil\frac{M}{8d}\rceil, B_r = \min(\lceil\frac{M}{8d}\rceil, d)$. The former helps reduce the HBM access while the latter ensures GEMM efficiency in the inner loop.
+
+The primary flops are spent on GEMM operations
+
+$$
+\begin{aligned}
+S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+O_i' &= \text{diag}(l_i')^{-1} (\text{diag}(l_i) e^{m_i - m_i'} O_i + e^{\hat{m}_{ij} - m_i'} \hat{P}_{ij} V_j) \in \mathbb{R}^{B_c \times d} \\
+\hat{P}_{ij} &= e^{S_{ij} - \hat{m}_{ij}} \in \mathbb{R}^{B_r \times B_c} \\
+\end{aligned}
+$$
+
+$Q_i K_j^T$ and $\hat{P}_{ij} V_j$ both require $2B_r B_c d$ flops. Therefore the total flops is $4 T_c T_r B_r B_c d = 4n^2d$ flops.
+
+It will also be interesting to take a look at the `exp` operations, in the inner loop we have the following
+
+$$
+\begin{aligned}
+\hat{P}_{ij} &= e^{S_{ij} - \hat{m}_{ij}} \in \mathbb{R}^{B_r \times B_c} \\
+l_i' &= e^{m_i - m_i'} l_i + e^{\hat{m}_{ij} - m_i'} \hat{l}_{ij} \in \mathbb{R}^{B_r} \\
+O_i' &= \text{diag}(l_i')^{-1} (\text{diag}(l_i) e^{m_i - m_i'} O_i + e^{\hat{m}_{ij} - m_i'} \hat{P}_{ij} V_j) \in \mathbb{R}^{B_c \times d}
+\end{aligned}
+$$
+
+$`e^{S_{ij} - \hat{m}_{ij}}`$ requires $B_r B_c$ `exp` operations, $`e^{m_i - m_i'}`$ and $`e^{\hat{m}_{ij} - m_i'}`$ each requires $B_r$ `exp` operations. A total number of $T_r T_c (B_r B_c + 2 B_r) = n^2 (1 + \frac{2}{B_c})$.
+
+The above results also indicate that if the hardward hardware GEMM flops is $4d$ times larger than its `exp` flops, the calculation will be bound on `exp` operations.
+
+For the backward pass, the trick is that we can always reconstruct the attention scores using $m$ and $l$, because $y_i = \frac{e^{x_i - m_N}}{l_N}$.
+
+Let's first review the values we have on HBM
+
+- $Q \in \mathbb{R}^{n \times d}$: Query matrix
+- $K \in \mathbb{R}^{n \times d}$: Key matrix
+- $V \in \mathbb{R}^{n \times d}$: Value matrix
+- $O \in \mathbb{R}^{n \times d}$: Output matrix
+- $dO \in \mathbb{R}^{n \times d}$: Output gradient
+- $m \in \mathbb{R}^n$: Maximum attention weights
+- $l \in \mathbb{R}^n$: Softmax denominator
+
+For outputs, we pre-allocate some extra tensors on HBM
+
+- $dQ \in \mathbb{R}^{n \times d}$: Query matrix gradient
+- $dK \in \mathbb{R}^{n \times d}$: Key matrix
+- $dV \in \mathbb{R}^{n \times d}$: Value matrix
+
+Let's assume that $Q, dQ, O, dO$ are divided into blocks of shape $\mathbb{R}^{B_r \times d}$, and $K, dK, V, dV$ are divided into blocks of shape $\mathbb{R}^{B_c \times d}$.
+
+There will be $T_r = \lceil \frac{n}{B_r} \rceil$ $Q, dQ, O, dO$ blocks and $T_c = \lceil \frac{n}{B_c} \rceil$ $K, dK, V, dV$ blocks respectively.
+
+The backward computation process can be implemented as
+
+---
+
+```
+for j = 1 to T_c
+```
+
+Outer loop:
+
+Load $K_j, V_j \in \mathbb{R}^{B_c \times d}$ from HBM into SRAM. Initialize $dK_j, dV_j = (0)_{B_c \times d} \in \mathbb{R}^{B_c \times d}$ on SRAM.
+
+```
+    for i = 1 to T_r
+```
+
+Inner loop:
+
+Load $Q_i, dQ_i, O_i, dO_i \in \mathbb{R}^{B_r \times d}$ and $m_i, l_i \in \mathbb{R}^{B_r}$ from HBM into SRAM
+
+1. Computation
+
+$$
+\begin{aligned}
+S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+P_{ij} &= \text{diag}(l_i)^{-1} e^{S_{ij} - m_i} \in \mathbb{R}^{B_r \times B_c} \\
+dV_j &\leftarrow dV_j + P_{ij}^T dO_i \in \mathbb{R}^{B_c \times d} \\
+dP_{ij} &= dO_i V_j^T \in \mathbb{R}^{B_r \times B_c} \\
+D_i &= \text{rowsum}(dO_i \odot O_i) \in \mathbb{R}^{B_r} \\
+dS_{ij} &= P_{ij} \odot (dP_{ij} - D_i) \in \mathbb{R}^{B_r \times B_c} \\
+dQ_i' &\leftarrow dQ_i + dS_{ij} K_j \in \mathbb{R}^{B_r \times d} \\
+dK_j &\leftarrow dK_j + dS_{ij}^T Q_i \in \mathbb{R}^{B_c \times d}
+\end{aligned}
+$$
+
+2. Write back HBM
+
+$$
+dQ_i = dQ_i'
+$$
+
+```
+    end
+```
+
+Write back $dK_j, dV_j \in \mathbb{R}^{B_c \times d}$ to HBM.
+
+```
+end
+```
+
+---
+
+Now, let's take a look at the memory access and flops pattern assuming that we're using bfloat16.
+
+On HBM, we have $Q, dQ, K, dK, V, dV, O, dO$ consumes $16nd$ bytes and $m, l$ consumes $4n$ bytes. Therefore the total HBM consumpation is $16nd + 4n$.
+
+In the outer loop, $K_j, V_j \in \mathbb{R}^{B_c \times d}$ are read into SRAM, there are $4 B_c d$ bytes HBM read. Since the outer loop repeats $T_c$ times, the total read volume is $4 B_c d T_c = 4nd$. On the other hand, $dK_j, dV_j \in \mathbb{R}^{B_c \times d}$ are written back to HBM, accounting for $4B_c d$ bytes HBM write, and the total write volume is $4B_c d T_c = 4nd$.
+
+In the inner loop, $Q_i, dQ_i, O_i, dO_i \in \mathbb{R}^{B_r \times d}$ and $m_i, l_i \in \mathbb{R}^{B_r}$ are read from HBM, creating $8 B_r d + 4 B_r$ bytes read. Since the inner loop repeats $T_c T_r$ times, the total read volume is $(8 B_r d + 4 B_r)T_r T_c = n(8d + 4)T_c$. As for the write back, $dQ_i \in \mathbb{R}^{B_r \times d}$ is written back to HBM, creating $2 B_r d$ bytes write. Since the inner loop repeats $T_c T_r$ times, the total write volume is $2 B_r d T_r T_c = 2ndT_c$.
+
+Therefore, the total HBM access volume is roughly $4nd + 4nd + n(8d + 4)T_c + 2ndT_c \approx 2nd (4 + 5\lceil\frac{n}{B_c}\rceil)$ bytes.
+
+Apparently by having a larger $B_c$, we significantly reduce the HBM access volume. $K_j, dK_j, V_j, dV_j \in \mathbb{R}^{B_c \times d}$ and $Q_i, dQ_i, O_i, dO_i \in \mathbb{R}^{B_r \times d}$ takes $8 (B_c + B_r) d$ bytes on SRAM, for a SRAM of size $M$, we have
+
+$$
+\begin{aligned}
+8 (B_c + B_r) d &\leq M \\
+B_c + B_r &\leq \frac{M}{8d}
+\end{aligned}
+$$
+
+Thus we set $B_c = \lceil\frac{M}{16d}\rceil, B_r = \min(\lceil\frac{M}{16d}\rceil, d)$. The former helps reduce the HBM access while the latter ensures GEMM efficiency in the inner loop.
+
+The primary flops are spent on GEMM operations
+
+$$
+\begin{aligned}
+S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+dV_j &\leftarrow dV_j + P_{ij}^T dO_i \in \mathbb{R}^{B_c \times d} \\
+dP_{ij} &= dO_i V_j^T \in \mathbb{R}^{B_r \times B_c} \\
+dQ_i' &\leftarrow dQ_i + dS_{ij} K_j \in \mathbb{R}^{B_r \times d} \\
+dK_j &\leftarrow dK_j + dS_{ij}^T Q_i \in \mathbb{R}^{B_c \times d}
+\end{aligned}
+$$
+
+$Q_i K_j^T$ and $dO_i V_j^T$ each requires $2B_r B_c d$ flops. $P_{ij}^T dO_i$ and $dS_{ij}^T Q_i$ each requires $2 B_r d B_c$ flops. $dS_{ij} K_j$ requires $2 B_r B_c d$ flops. Therefore the total flops is $10 T_c T_r B_r B_c d = 10n^2d$ flops, which is $2.5\times$ that of forward passes. Compare with a regular backward pass of a linear layer, the extra $0.5\times$ comes from the fact that we need to recompute attention scores on the fly.
+
+It will also be interesting to take a look at the `exp` operations, in the inner loop we have the following
+
+$$
+P_{ij} = \text{diag}(l_i)^{-1} e^{S_{ij} - m_j} \in \mathbb{R}^{B_r \times B_c}
+$$
+
+$e^{S_{ij} - m_j}$ requires $B_r B_c$ `exp` operations, the total flops is $T_r T_c B_r B_c = n^2$.
+
+The above results also indicate that if the backward hardware GEMM flops is $10d$ times larger than its `exp` flops, the calculation will be bound on `exp` operations.
+
+## Flash Attention 2
+
+## Flash Attention 3
+
 ## References
 
-* [FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/pdf/2205.14135)
-* [From Online Softmax to FlashAttention](https://courses.cs.washington.edu/courses/cse599m/23sp/notes/flashattn.pdf)
+- [From Online Softmax to FlashAttention](https://courses.cs.washington.edu/courses/cse599m/23sp/notes/flashattn.pdf)
+- [FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/pdf/2205.14135)
+- [FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning](https://arxiv.org/pdf/2307.08691)
+- [FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision](https://arxiv.org/pdf/2407.08608)
