@@ -1,21 +1,36 @@
 # Flash Attention Speedrun
 
-## Symbols
+This document provides a mathematical walkthrough of **Flash Attention**, an algorithm that significantly speeds up attention mechanisms in Transformers by minimizing memory access. We start from the basics of **Online Softmax** and build up to the full Flash Attention algorithm.
 
-- $Q \in \mathbb{R}^{n \times d}$: Query matrix
-- $K \in \mathbb{R}^{n \times d}$: Key matrix
-- $V \in \mathbb{R}^{n \times d}$: Value matrix
-- $S \in \mathbb{R}^{n \times n}$: Attention scores (pre-softmax)
-- $P \in \mathbb{R}^{n \times n}$: Attention weights (post-softmax)
-- $O \in \mathbb{R}^{n \times d}$: Output matrix
-- $n$: Sequence length
-- $d$: Head dimension
-- $L$: Scalar loss
+## Symbols and Notation
+
+Here are the mathematical symbols used throughout this guide:
+
+**Inputs & Outputs:**
+- $Q \in \mathbb{R}^{n \times d}$: **Query** matrix (input)
+- $K \in \mathbb{R}^{n \times d}$: **Key** matrix (input)
+- $V \in \mathbb{R}^{n \times d}$: **Value** matrix (input)
+- $O \in \mathbb{R}^{n \times d}$: **Output** matrix (result of attention)
+
+**Intermediate Variables:**
+- $S \in \mathbb{R}^{n \times n}$: **Attention Scores** (pre-softmax, $Q K^T$)
+- $P \in \mathbb{R}^{n \times n}$: **Attention Weights** (post-softmax probabilities)
+- $m$: **Running Maximum** (used for numerical stability)
+- $l$: **Running Sum** (normalization factor for softmax)
+
+**Dimensions:**
+- $n$: Sequence length (number of tokens)
+- $d$: Head dimension (feature size per head)
+
+**Gradients (for Backward Pass):**
+- $L$: Scalar loss function value
 - $dO = \frac{\partial L}{\partial O}$: Gradient of the loss with respect to the output
 
 ## Online Softmax
 
-Given an input vector $`x = \{x_i\}_{i = 1}^N`$, the softmax operation generates a new vector
+Standard Softmax computes the exponential of the entire input vector at once. **Online Softmax** computes it incrementally, which is crucial for processing large sequences without keeping everything in memory.
+
+Given an input vector $`x = \{x_i\}_{i = 1}^N`$, the standard softmax operation generates a new vector $y$:
 
 ```math
 \begin{aligned}
@@ -24,7 +39,9 @@ y_i &= \frac{e^{x_i}}{\sum_{j = 1}^N e^{x_j}}
 \end{aligned}
 ```
 
-To avoid overflow during the exponential operations, we usually rewrite the formula as
+### Numerical Stability (Safe Softmax)
+
+Directly computing $e^{x_i}$ can lead to **numerical overflow** if $x_i$ is large (e.g., $e^{100}$ is huge). To prevent this, we subtract the maximum value $m = \max(x)$ from each element. This shifts the largest exponent to 0 ($e^0=1$), keeping values manageable without changing the result:
 
 $$
 \begin{aligned}
@@ -33,22 +50,29 @@ y_i &= \frac{e^{x_i - m}}{\sum_{j = 1}^N e^{x_j - m}}
 \end{aligned}
 $$
 
-It's very clear that in its current form, a naive way to compute $y$ is:
+### Naive Implementation (3-Pass)
+
+A straightforward implementation requires **three passes** over the data:
+1. Find the max $m$.
+2. Compute the sum of exponentials (denominator) $l$.
+3. Compute the final values $y_i$.
+
+Let's trace this naive approach:
 
 ---
 
-1. Initialization
+**1. Initialization**
 
 $$
 \begin{aligned}
-m_0 &= -\infty \\
+m_0 &= - \infty \\
 l_0 &= 0
 \end{aligned}
 $$
 
 ---
 
-2. Getting maximum
+**2. Pass 1: Find Maximum**
 
 ```
 for i = 1 to N
@@ -64,7 +88,7 @@ end
 
 ---
 
-3. Computing softmax denominator
+**3. Pass 2: Compute Denominator**
 
 ```
 for i = 1 to N
@@ -80,7 +104,7 @@ end
 
 ---
 
-4. Computing softmax results
+**4. Pass 3: Compute Output**
 
 ```
 for i = 1 to N
@@ -96,7 +120,11 @@ end
 
 ---
 
-This algorithm generates two intermediate sequences, one for the running maximum of the input vector
+This approach is inefficient because it reads the input $x$ multiple times.
+
+### The Online Algorithm (2-Pass)
+
+The 3-pass algorithm generates two intermediate sequences, one for the running maximum of the input vector
 
 ```math
 \begin{aligned}
@@ -114,10 +142,8 @@ l_i &= \sum_{j = 1}^ie^{x_j - m_N}
 \end{aligned}
 ```
 
-It's clear that $l_i$ relies on $m_N$, which is the only thing that's preventing us from computing both $m_i$ and $l_i$ together.
-
-Let's look at an alternative variable
-
+The challenge is that the denominator $l$ depends on the *global* max $m_N$, which we don't know until the end.
+However, we can maintain a "running" denominator $l'$ that uses the *current* max $m_i$.
 ```math
 \begin{aligned}
 l' &= \{l_i'\}_{i = 1}^N \\
@@ -125,18 +151,20 @@ l_i' &= \sum_{j = 1}^i e^{x_j - m_j}
 \end{aligned}
 ```
 
-Notice that $l_N' = l_N$, which is exactly the softmax denominator. Therefore, we could use the following recurrence relation
+Notice that $l_N' = l_N$, which is exactly the softmax denominator. Therefore, we could use the following recurrence relation:
 
 $$
 \begin{aligned}
 m_i &= \max({m_{i - 1}, x_i}) \\
-l_i' &= \sum_{j = 1}^i e^{x_j - m_j} \\
-     &= \sum_{j = 1}^{i - 1} e^{x_j - m_j} + e^{x_i - m_i} \\
-     &= l_{i - 1}' e^{m_{i - 1} - m_i} + e^{x_i - m_i}
+l_i' &= \sum_{j = 1}^i e^{x_j - m_i} \\
+&= \sum_{j = 1}^{i - 1} e^{x_j - m_i} + e^{x_i - m_i} \\
+&= \sum_{j = 1}^{i - 1} e^{x_j - m_{i-1} + m_{i-1} - m_i} + e^{x_i - m_i} \\
+&= e^{m_{i-1} - m_i} \underbrace{\sum_{j = 1}^{i - 1} e^{x_j - m_{i-1}}}_{l'_{i-1}} + e^{x_i - m_i} \\
+&= l_{i - 1}' \cdot e^{m_{i - 1} - m_i} + e^{x_i - m_i}
 \end{aligned}
 $$
 
-Based on the formula, $l_i'$ depends only on $l_{i - 1}'$, $m_{i - 1}$, $m_i$ and $x_i$, which means we can compute its value in one go.
+Based on the formula, $l_i'$ depends only on $l_{i - 1}'$, $m_{i - 1}$, $m_i$ and $x_i$. This allows us to compute both the max and the sum in one go:
 
 ---
 
@@ -151,7 +179,7 @@ $$
 
 ---
 
-2. Online computation
+2. Pass-1: Online computation
 
 ```
 for i = 1 to N
@@ -170,7 +198,7 @@ end
 
 ---
 
-3. Computing softmax results
+3. Pass-2: Computing softmax results
 
 ```
 for i = 1 to N
@@ -200,9 +228,20 @@ O &= PV
 \end{aligned}
 $$
 
-Let's take a closer look at the attention computation over the $k$-th row of the query matrix $q = Q[k, :]$
+### Standard Attention (row-wise)
+
+Let's look at the attention computation for a single query row $q = Q[k, :]$.
+The standard algorithm would be:
+
+1.  Compute scores $x = q K^T$.
+2.  Compute softmax statistics $m, l$.
+3.  Compute output $o = \text{softmax}(x) V$.
+
+Using the "naive" online softmax logic derived above, this looks like:
 
 ---
+
+**Pass 1: Statistics**
 
 ```
 for i = 1 to N
@@ -222,6 +261,8 @@ end
 
 ---
 
+**Pass 2: Output Accumulation**
+
 ```
 for i = 1 to N
 ```
@@ -239,9 +280,9 @@ end
 
 ---
 
-$$
-O[k, :] = o_N
-$$
+$$ O[k, :] = o_N $$ 
+
+### Fusing the Loops
 
 Let's take a closer look at the second loop, clearly we have
 
@@ -252,22 +293,32 @@ o_i &= \sum_{j = 1}^i y_j V[j, :] \\
 \end{aligned}
 $$
 
-We can use the same trick which we applied in online softmax, we define a new variable
+We want to compute $o_i$ in the *same* loop as $m_i$ and $l_i$.
+However, $y_i$ depends on the final $m_N$ and $l_N$.
+
+Let's recall the online softmax trick and define the running output $o'_i$ using the *current* max $m_i$ and sum $l_i$:
 
 $$
 o_i' = \sum_{j = 1}^i \frac{e^{x_j - m_i}}{l_i} V[j, :]
 $$
 
-which gives the following recurrence relation
+Now, let's derive the update rule for $`o'_i`$.
+We want to express $`o'_i`$ using the previous value $`o'_{i-1}`$.
 
 $$
 \begin{aligned}
-o_i' &= \sum_{j = 1}^{i - 1} \frac{e^{x_j - m_i}}{l_i} V[j, :] + \frac{e^{x_i - m_i}}{l_i} V[i, :] \\
-     &= o_{i - 1}' \frac{l_{i - 1} e^{m_{i - 1} - m_i}}{l_i} + \frac{e^{x_i - m_i}}{l_i} V[i, :]
+o_i' &= \frac{1}{l_i} \left( \sum_{j = 1}^{i - 1} e^{x_j - m_i} V[j, :] + e^{x_i - m_i} V[i, :] \right) \\
+&= \frac{1}{l_i} \left( \sum_{j = 1}^{i - 1} e^{x_j - m_{i-1} + m_{i-1} - m_i} V[j, :] + e^{x_i - m_i} V[i, :] \right) \\
+&= \frac{1}{l_i} \left( e^{m_{i-1} - m_i} \underbrace{\sum_{j = 1}^{i - 1} e^{x_j - m_{i-1}} V[j, :]}_{o'_{i-1} \cdot l_{i-1}} + e^{x_i - m_i} V[i, :] \right) \\
+&= \frac{1}{l_i} \left( o'_{i-1} \cdot l_{i-1} \cdot e^{m_{i-1} - m_i} + e^{x_i - m_i} V[i, :] \right)
 \end{aligned}
 $$
 
-We can see that $o_i'$ only depends on $o_{i - 1}'$, $l_{i - 1}$, $l_i$, $m_{i - 1}$, $m_i$ and $x_i$, therefore we can fuse all calculations in one single loop
+This gives us the update rule:
+1.  **Rescale** the old output $`o'_{i-1}`$ by $`(l_{i-1} / l_i) \cdot e^{m_{i-1} - m_i}`$.
+2.  **Add** the new term, scaled by $e^{x_i - m_i} / l_i$.
+
+We can see that $o_i'$ only depends on $o_{i - 1}'$, $l_{i - 1}$, $l_i$, $m_{i - 1}$, $m_i$ and $x_i$. This allows us to fuse everything into one single loop:
 
 ```
 for i = 1 to N
@@ -554,9 +605,9 @@ O_i' &= \text{diag}(l_i')^{-1} (\text{diag}(l_i) e^{m_i - m_i'} O_i + e^{\hat{m}
 \end{aligned}
 $$
 
-$`e^{S_{ij} - \hat{m}_{ij}}`$ requires $B_r B_c$ `exp` operations, $`e^{m_i - m_i'}`$ and $`e^{\hat{m}_{ij} - m_i'}`$ each requires $B_r$ `exp` operations. A total number of $T_r T_c (B_r B_c + 2 B_r) = n^2 (1 + \frac{2}{B_c})$.
+$`e^{S_{ij} - \hat{m}_{ij}}`$ requires $B_r B_c$ `exp` operations, $`e^{m_i - m_i'}`$ and $`e^{\hat{m}_{ij} - m_i'}`$ each requires $B_r$ `exp` operations. So the total number of `exp` operations is $T_r T_c (B_r B_c + 2 B_r) = n^2 (1 + \frac{2}{B_c})$.
 
-The above results also indicate that if the hardward hardware GEMM flops is $4d$ times larger than its `exp` flops, the calculation will be bound on `exp` operations.
+The above results indicate that if the achieved GEMM flops is $4d$ times larger than its hardware peak `exp` flops, the calculation will be bound on `exp` operations.
 
 For the backward pass, the trick is that we can always reconstruct the attention scores using $m$ and $l$, because $y_i = \frac{e^{x_i - m_N}}{l_N}$.
 
@@ -676,7 +727,7 @@ $$
 
 $e^{S_{ij} - m_j}$ requires $B_r B_c$ `exp` operations, the total flops is $T_r T_c B_r B_c = n^2$.
 
-The above results also indicate that if the backward hardware GEMM flops is $10d$ times larger than its `exp` flops, the calculation will be bound on `exp` operations.
+The above results also indicate that if the backward achieved GEMM flops is $10d$ times larger than the hardware peak `exp` flops, the calculation will be bound on `exp` operations. The ratio is larger than that of the forward pass, so it's more likely that we encounter `exp` bound during forward computation.
 
 ## Flash Attention 2
 
