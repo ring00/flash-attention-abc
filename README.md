@@ -15,7 +15,7 @@ Here are the mathematical symbols used throughout this guide:
 
 **Intermediate Variables:**
 
-- $S \in \mathbb{R}^{n \times n}$: **Attention Scores** (pre-softmax, $Q K^T$)
+- $S \in \mathbb{R}^{n \times n}$: **Attention Scores** (pre-softmax, $Q K^{\mathsf T}$)
 - $P \in \mathbb{R}^{n \times n}$: **Attention Weights** (post-softmax probabilities)
 - $m$: **Running Maximum** (used for numerical stability)
 - $l$: **Running Sum** (normalization factor for softmax)
@@ -228,7 +228,7 @@ Given $Q, K, V \in \mathbb{R}^{n \times d}$, where $n \in \mathbb{N^+}$ is the s
 
 $$
 \begin{aligned}
-S &= QK^T \\
+S &= QK^{\mathsf T} \\
 P &= \text{softmax}(S) \\
 O &= PV
 \end{aligned}
@@ -239,7 +239,7 @@ $$
 Let's look at the attention computation for a single query row $q = Q[k, :]$.
 The standard algorithm would be:
 
-1.  Compute scores $x = q K^T$.
+1.  Compute scores $x = q K^{\mathsf T}$.
 2.  Compute softmax statistics $m, l$.
 3.  Compute output $o = \text{softmax}(x) V$.
 
@@ -255,7 +255,7 @@ for i = 1 to N
 
 $$
 \begin{aligned}
-x_i &= qK[i, :]^T \\
+x_i &= qK[i, :]^{\mathsf T} \\
 m_i &= \max(m_{i - 1}, x_i) \\
 l_i &= l_{i - 1} e^{m_{i - 1} - m_i} + e^{x_i - m_i}
 \end{aligned}
@@ -333,7 +333,7 @@ for i = 1 to N
 
 $$
 \begin{aligned}
-x_i &= qK[i, :]^T \\
+x_i &= qK[i, :]^{\mathsf T} \\
 m_i &= \max(m_{i - 1}, x_i) \\
 l_i &= l_{i - 1} e^{m_{i - 1} - m_i} + e^{x_i - m_i} \\
 o_i' &= \frac{1}{l_i}(l_{i - 1} e^{m_{i - 1} - m_i} o_{i - 1}' + e^{x_i - m_i} V[i, :])
@@ -350,7 +350,7 @@ Recall that attention operation calculates
 
 $$
 \begin{aligned}
-S &= QK^T \\
+S &= QK^{\mathsf T} \\
 P &= \text{softmax}(S) \\
 O &= PV
 \end{aligned}
@@ -405,18 +405,35 @@ $$
 By vectorizing the formula we get
 
 $$
-J = \text{diag}(y) - y^Ty \in \mathbb{R}^{d \times d}
+J = \text{diag}(y) - y^{\mathsf T}y \in \mathbb{R}^{d \times d}
 $$
 
 For backward computation, assume that we have a scalar loss $L$, applying the chain-rule we get
 
 $$
 \begin{aligned}
-\frac{\partial L}{\partial x_i} &= \sum_{j = 1}^N \frac{\partial L}{\partial y_j} \frac{\partial y_j}{\partial x_i} \\
-                                &= \sum_{j = 1}^N \frac{\partial L}{\partial y_j} y_j (\mathbb{I}[i = j] - y_i) \\
-                                &= dy \cdot J[:, i] \\
-dx &= dy \cdot J \\
-   &= dy (\text{diag}(y) - y^Ty)
+\left[
+\frac{\partial L}{\partial x_1},
+\frac{\partial L}{\partial x_2},
+\cdots,
+\frac{\partial L}{\partial x_N}
+\right]
+&=
+\left[
+\frac{\partial L}{\partial y_1},
+\frac{\partial L}{\partial y_2},
+\cdots,
+\frac{\partial L}{\partial y_N}
+\right]
+\begin{bmatrix}
+\frac{\partial y_1}{\partial x_1} & \frac{\partial y_1}{\partial x_2} & \cdots & \frac{\partial y_1}{\partial x_N} \\
+\frac{\partial y_2}{\partial x_1} & \frac{\partial y_2}{\partial x_2} & \cdots & \frac{\partial y_2}{\partial x_N} \\
+\vdots & \vdots & \ddots & \vdots \\
+\frac{\partial y_N}{\partial x_1} & \frac{\partial y_N}{\partial x_2} & \cdots & \frac{\partial y_N}{\partial x_N}
+\end{bmatrix}
+\\
+\frac{\partial L}{\partial x} &= \frac{\partial L}{\partial y} \cdot J \\
+dx &= dy \left( \text{diag}(y) - y^{\mathsf T}y \right)
 \end{aligned}
 $$
 
@@ -434,25 +451,25 @@ $$
 
 $$
 \begin{aligned}
-ds &= dp (\text{diag}(p) - p^Tp) \\
-   &= dp \odot p - (dp \cdot p^T) p
+ds &= dp (\text{diag}(p) - p^{\mathsf T}p) \\
+   &= dp \odot p - (dp \cdot p^{\mathsf T}) p
 \end{aligned}
 $$
 
-We know that $dP = dO \cdot V^T$, which gives us
+We know that $dP = dO \cdot V^{\mathsf T}$, which gives us
 
 $$
 \begin{aligned}
 dp &= dP[i, :] \\
    &= \sum_{j = 1}^N dO[i, :] V[:, j] \\
-dp \cdot p^T &= \sum_{j = 1}^N dO[i, :] V[:, j] P[i, :]^T \\
-             &= dO[i, :] \sum_{j = 1}^N V[:, j] P[i, :]^T \\
-             &= dO[i, :] O[i, :]^T \\
-             &= do \cdot o^T \in \mathbb{R}
+dp \cdot p^{\mathsf T} &= \sum_{j = 1}^N dO[i, :] V[:, j] P[i, :]^{\mathsf T} \\
+             &= dO[i, :] \sum_{j = 1}^N V[:, j] P[i, :]^{\mathsf T} \\
+             &= dO[i, :] O[i, :]^{\mathsf T} \\
+             &= do \cdot o^{\mathsf T} \in \mathbb{R}
 \end{aligned}
 $$
 
-Let $d = do \cdot o^T = dO[i, :] O[i, :]^T$, we have
+Let $d = do \cdot o^{\mathsf T} = dO[i, :] O[i, :]^{\mathsf T}$, we have
 
 ```math
 \begin{aligned}
@@ -480,9 +497,9 @@ Finally, we can compute the gradients for $Q, K, V$:
 
 $$
 \begin{aligned}
-dV &= P^T dO \\
+dV &= P^{\mathsf T} dO \\
 dQ &= dS K \\
-dK &= dS^T Q
+dK &= dS^{\mathsf T} Q
 \end{aligned}
 $$
 
@@ -530,7 +547,7 @@ Load $Q_i, O_i \in \mathbb{R}^{B_r \times d}$ and $m_i, l_i \in \mathbb{R}^{B_r}
 
 $$
 \begin{aligned}
-S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+S_{ij} &= Q_i K_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
 \hat{m}_{ij} &= \text{rowmax}(S_{ij}) \in \mathbb{R}^{B_r} \\
 \hat{P}_{ij} &= e^{S_{ij} - \hat{m}_{ij}} \in \mathbb{R}^{B_r \times B_c} \\
 \hat{l}_{ij} &= \text{rowsum}(\hat{P}_{ij}) \in \mathbb{R}^{B_r}
@@ -594,13 +611,13 @@ The primary flops are spent on GEMM operations
 
 $$
 \begin{aligned}
-S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+S_{ij} &= Q_i K_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
 O_i' &= \text{diag}(l_i')^{-1} (\text{diag}(l_i) e^{m_i - m_i'} O_i + e^{\hat{m}_{ij} - m_i'} \hat{P}_{ij} V_j) \in \mathbb{R}^{B_r \times d} \\
 \hat{P}_{ij} &= e^{S_{ij} - \hat{m}_{ij}} \in \mathbb{R}^{B_r \times B_c} \\
 \end{aligned}
 $$
 
-$Q_i K_j^T$ and $\hat{P}_{ij} V_j$ both require $2B_r B_c d$ flops. Therefore the total flops is $4 T_c T_r B_r B_c d = 4n^2d$ flops.
+$Q_i K_j^{\mathsf T}$ and $\hat{P}_{ij} V_j$ both require $2B_r B_c d$ flops. Therefore the total flops is $4 T_c T_r B_r B_c d = 4n^2d$ flops.
 
 It will also be interesting to take a look at the `exp` operations, in the inner loop we have the following
 
@@ -660,14 +677,14 @@ Load $Q_i, dQ_i, O_i, dO_i \in \mathbb{R}^{B_r \times d}$ and $m_i, l_i \in \mat
 
 $$
 \begin{aligned}
-S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+S_{ij} &= Q_i K_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
 P_{ij} &= \text{diag}(l_i)^{-1} e^{S_{ij} - m_i} \in \mathbb{R}^{B_r \times B_c} \\
-dV_j &\leftarrow dV_j + P_{ij}^T dO_i \in \mathbb{R}^{B_c \times d} \\
-dP_{ij} &= dO_i V_j^T \in \mathbb{R}^{B_r \times B_c} \\
+dV_j &\leftarrow dV_j + P_{ij}^{\mathsf T} dO_i \in \mathbb{R}^{B_c \times d} \\
+dP_{ij} &= dO_i V_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
 D_i &= \text{rowsum}(dO_i \odot O_i) \in \mathbb{R}^{B_r} \\
 dS_{ij} &= P_{ij} \odot (dP_{ij} - D_i) \in \mathbb{R}^{B_r \times B_c} \\
 dQ_i' &\leftarrow dQ_i + dS_{ij} K_j \in \mathbb{R}^{B_r \times d} \\
-dK_j &\leftarrow dK_j + dS_{ij}^T Q_i \in \mathbb{R}^{B_c \times d}
+dK_j &\leftarrow dK_j + dS_{ij}^{\mathsf T} Q_i \in \mathbb{R}^{B_c \times d}
 \end{aligned}
 $$
 
@@ -714,15 +731,15 @@ The primary flops are spent on GEMM operations
 
 $$
 \begin{aligned}
-S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
-dV_j &\leftarrow dV_j + P_{ij}^T dO_i \in \mathbb{R}^{B_c \times d} \\
-dP_{ij} &= dO_i V_j^T \in \mathbb{R}^{B_r \times B_c} \\
+S_{ij} &= Q_i K_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
+dV_j &\leftarrow dV_j + P_{ij}^{\mathsf T} dO_i \in \mathbb{R}^{B_c \times d} \\
+dP_{ij} &= dO_i V_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
 dQ_i' &\leftarrow dQ_i + dS_{ij} K_j \in \mathbb{R}^{B_r \times d} \\
-dK_j &\leftarrow dK_j + dS_{ij}^T Q_i \in \mathbb{R}^{B_c \times d}
+dK_j &\leftarrow dK_j + dS_{ij}^{\mathsf T} Q_i \in \mathbb{R}^{B_c \times d}
 \end{aligned}
 $$
 
-$Q_i K_j^T$ and $dO_i V_j^T$ each requires $2B_r B_c d$ flops. $P_{ij}^T dO_i$ and $dS_{ij}^T Q_i$ each requires $2 B_r d B_c$ flops. $dS_{ij} K_j$ requires $2 B_r B_c d$ flops. Therefore the total flops is $10 T_c T_r B_r B_c d = 10n^2d$ flops, which is $2.5\times$ that of forward passes. Compare with a regular backward pass of a linear layer, the extra $0.5\times$ comes from the fact that we need to recompute attention scores on the fly.
+$Q_i K_j^{\mathsf T}$ and $dO_i V_j^{\mathsf T}$ each requires $2B_r B_c d$ flops. $P_{ij}^{\mathsf T} dO_i$ and $dS_{ij}^{\mathsf T} Q_i$ each requires $2 B_r d B_c$ flops. $dS_{ij} K_j$ requires $2 B_r B_c d$ flops. Therefore the total flops is $10 T_c T_r B_r B_c d = 10n^2d$ flops, which is $2.5\times$ that of forward passes. Compare with a regular backward pass of a linear layer, the extra $0.5\times$ comes from the fact that we need to recompute attention scores on the fly.
 
 It will also be interesting to take a look at the `exp` operations, in the inner loop we have the following
 
@@ -800,7 +817,7 @@ Load $K_j, V_j \in \mathbb{R}^{B_c \times d}$ from HBM to SRAM.
 
 $$
 \begin{aligned}
-S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+S_{ij} &= Q_i K_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
 \hat{m}_{ij} &= \text{rowmax}(S_{ij}) \in \mathbb{R}^{B_r} \\
 m_i^{new} &= \max(m_i, \hat{m}_{ij}) \in \mathbb{R}^{B_r} \\
 \hat{P}_{ij} &= e^{S_{ij} - m_i^{new}} \in \mathbb{R}^{B_r \times B_c} \\
@@ -860,7 +877,7 @@ $$
 D = \text{rowsum}(dO \odot O) \in \mathbb{R}^n
 $$
 
-This vector $D$ is small ($O(n)$) compared to the matrices ($O(n \times d)$) and can be computed in a single pass over $dO$ and $O$.
+This vector $D$ is small ($`O(n)`$) compared to the matrices ($`O(n \times d)`$) and can be computed in a single pass over $dO$ and $O$.
 
 By computing $D$ upfront:
 
@@ -899,13 +916,13 @@ Load $Q_i, dO_i \in \mathbb{R}^{B_r \times d}$ and $L_i, D_i \in \mathbb{R}^{B_r
 
 $$
 \begin{aligned}
-S_{ij} &= Q_i K_j^T \in \mathbb{R}^{B_r \times B_c} \\
+S_{ij} &= Q_i K_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
 P_{ij} &= e^{S_{ij} - L_i} \in \mathbb{R}^{B_r \times B_c} \\
-dV_j &\leftarrow dV_j + P_{ij}^T dO_i \\
-dP_{ij} &= dO_i V_j^T \in \mathbb{R}^{B_r \times B_c} \\
+dV_j &\leftarrow dV_j + P_{ij}^{\mathsf T} dO_i \\
+dP_{ij} &= dO_i V_j^{\mathsf T} \in \mathbb{R}^{B_r \times B_c} \\
 dS_{ij} &= P_{ij} \odot (dP_{ij} - D_i) \in \mathbb{R}^{B_r \times B_c} \\
 dQ_i &\leftarrow_{\text{atomic}}^{\text{HBM}} dQ_i + dS_{ij} K_j \\
-dK_j &\leftarrow dK_j + dS_{ij}^T Q_i
+dK_j &\leftarrow dK_j + dS_{ij}^{\mathsf T} Q_i
 \end{aligned}
 $$
 
